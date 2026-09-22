@@ -23,7 +23,13 @@ directly to the adapter using the [Web Serial API](https://developer.chrome.com/
 
 1. Open the page (hosted on GitHub Pages, or run locally — see below).
 2. Open the **Settings** panel and confirm the Slave ID, Baud rate, and Data format match your
-   drive's DIP switches (factory default: slave ID 1, 38400 baud, 8N1).
+   drive's DIP switches. The app's own defaults are slave ID 1, 115200 baud, 8N1, matching the
+   tested unit's configuration — note the driver's own factory-default DIP setting is actually
+   38400 baud, so double check this against your specific drive's DIP switches/registers rather
+   than assuming either default.
+   Also remember these are stored per-website-origin: settings saved while testing via a local
+   server won't carry over to the GitHub Pages URL (or vice versa) — you'll need to set them
+   again the first time you use a new origin.
 3. Click **Connect** and choose your USB-RS485 adapter from the browser's port picker.
 4. Set a speed and direction, click **Start**. Use **Stop** for a normal ramp-down, or the big
    red **EMERGENCY STOP** button (or the Space bar) for an immediate stop.

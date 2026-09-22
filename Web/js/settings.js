@@ -19,7 +19,7 @@ const BAUD_RATE_CODES = { 2400: 0, 4800: 1, 9600: 2, 19200: 3, 38400: 4, 57600: 
 
 const DEFAULT_SETTINGS = {
   slaveId: 1,
-  baudRate: 38400,
+  baudRate: 115200,
   dataFormat: '8N1',
   rpmMin: 1,
   rpmMax: 300,
