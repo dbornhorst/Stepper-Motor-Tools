@@ -20,6 +20,7 @@ const el = (id) => document.getElementById(id);
 const ui = {
   btnConnect: el('btn-connect'),
   btnDisconnect: el('btn-disconnect'),
+  btnChoosePort: el('btn-choose-port'),
   connectionState: el('connection-state'),
   linkLostBanner: el('link-lost-banner'),
   btnReconnect: el('btn-reconnect'),
@@ -242,6 +243,22 @@ async function disconnect() {
   app.state = STATE.DISCONNECTED;
   app.linkLost = false;
   renderState();
+}
+
+// Revokes the remembered port grant(s) so Connect is forced to show the native picker again,
+// letting the user pick a different device instead of silently reusing whatever was picked
+// before (the default behavior added for convenience - see connect()'s openKnownPort() call).
+async function chooseDifferentPort() {
+  ui.btnChoosePort.disabled = true;
+  try {
+    if (app.state !== STATE.DISCONNECTED) {
+      await disconnect();
+    }
+    await SerialTransport.forgetAllKnownPorts();
+    await connect();
+  } finally {
+    ui.btnChoosePort.disabled = false;
+  }
 }
 
 async function teardownConnection() {
@@ -584,6 +601,7 @@ function handleError(err, context) {
 function wireEvents() {
   ui.btnConnect.addEventListener('click', connect);
   ui.btnDisconnect.addEventListener('click', disconnect);
+  ui.btnChoosePort.addEventListener('click', chooseDifferentPort);
   ui.btnReconnect.addEventListener('click', reconnect);
 
   ui.rpmSlider.addEventListener('input', () => {

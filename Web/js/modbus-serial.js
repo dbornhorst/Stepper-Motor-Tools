@@ -95,6 +95,18 @@ class SerialTransport {
     return true;
   }
 
+  // Revokes all previously-granted permissions for this origin so the next connect attempt is
+  // forced to show the native port picker again, letting the user pick a different device
+  // instead of silently reusing whatever was picked before (openKnownPort()'s behavior).
+  static async forgetAllKnownPorts() {
+    const ports = await navigator.serial.getPorts();
+    for (const port of ports) {
+      if (typeof port.forget === 'function') {
+        await port.forget().catch(() => {});
+      }
+    }
+  }
+
   async _openPort(port, portOptions) {
     await port.open({
       baudRate: portOptions.baudRate,
