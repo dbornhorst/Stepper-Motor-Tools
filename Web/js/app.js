@@ -2,6 +2,10 @@ import { SerialTransport, ModbusRTU, ModbusTimeoutError, ModbusCrcError, ModbusF
 import { DM556RSDrive, DIRECTION } from './dm556rs.js';
 import { loadSettings, saveSettings, resetSettings, DATA_FORMAT_OPTIONS, BAUD_RATE_OPTIONS, BAUD_RATE_CODES } from './settings.js';
 
+// Feedback velocity (rpm) at or below this magnitude is treated as "actually stopped" - see
+// the STOPPING case in applyPollResult().
+const STOP_RPM_EPSILON = 1;
+
 const STATE = {
   DISCONNECTED: 'DISCONNECTED',
   CONNECTED_IDLE: 'CONNECTED_IDLE',
@@ -265,7 +269,9 @@ async function pollOnce() {
     const status = await app.drive.readStatus();
     const alarm = await app.drive.readAlarm();
     let feedbackRpm = null;
-    if (app.pollCycle % 4 === 0) {
+    // While stopping, we need actual speed every cycle (not just every 4th) to detect real
+    // standstill - see the STOPPING handling in applyPollResult() for why.
+    if (app.pollCycle % 4 === 0 || app.state === STATE.STOPPING) {
       feedbackRpm = await app.drive.readFeedbackVelocityRpm();
     }
 
@@ -300,7 +306,13 @@ function applyPollResult(status, alarm, feedbackRpm) {
   }
 
   if (app.state === STATE.STOPPING) {
-    if (!status.running) {
+    // The "running" status bit reflects whether a motion path is active, not whether the shaft
+    // is actually turning - on this driver it can stay set even after a velocity-mode path is
+    // re-triggered at 0 rpm (which is how a graceful stop is implemented). So treat "actual
+    // speed reads ~0" as the real stop signal, and the status bit clearing as a bonus signal,
+    // whichever comes first.
+    const atStandstill = feedbackRpm !== null && Math.abs(feedbackRpm) <= STOP_RPM_EPSILON;
+    if (!status.running || atStandstill) {
       clearStopTimeout();
       app.state = STATE.CONNECTED_IDLE;
     }
@@ -453,6 +465,7 @@ function renderState() {
 
   const directionDisabled = app.state === STATE.RUNNING || app.state === STATE.STOPPING;
   for (const radio of ui.directionRadios) radio.disabled = directionDisabled;
+  el('direction-hint').hidden = !directionDisabled;
 
   ui.faultPanel.hidden = app.state !== STATE.FAULTED;
   ui.estopPanel.hidden = app.state !== STATE.ESTOP_LATCHED;

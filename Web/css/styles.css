@@ -197,13 +197,16 @@ body {
   margin-top: 24px;
 }
 
-input, select {
+input[type="text"], input[type="number"], select {
   background: #14141f;
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 8px;
 }
+
+input:disabled { cursor: not-allowed; }
+.direction-toggle label:has(input:disabled) { opacity: 0.5; cursor: not-allowed; }
 
 @media (max-width: 480px) {
   .status-panel { flex-direction: column; text-align: center; }
