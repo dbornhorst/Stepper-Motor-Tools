@@ -68,11 +68,28 @@ still has two documented-but-unused fallback mechanisms (`setDirectionSense()`,
 `jogCW()`/`jogCCW()`) left in place in case a different unit/firmware revision behaves
 differently, but the shipped `startRun()` uses the signed-velocity approach.
 
-**The driver's "running" status bit (`0x1003` bit 2) does not mean "the shaft is turning."**
-Confirmed against real hardware: it stays set after commanding a velocity-mode run at 0 rpm (how
-graceful Stop works), and can also read as stale/true immediately after reconnecting even with
-the motor stationary. The app treats actual feedback speed (`0x1046`/`0x1047`) reading ~0 as the
-real "stopped" signal instead, in both the Stop flow and on-connect state reconciliation.
+**Two of the driver's status registers proved unreliable on tested hardware, so the app avoids
+depending on them:**
+- The **"running" status bit** (`0x1003` bit 2) does not mean "the shaft is turning." It stays
+  set indefinitely after commanding a velocity-mode run at 0 rpm (how graceful Stop works), and
+  can read as stale/true right after reconnecting even with the motor stationary.
+- The **"feedback (actual) velocity" register** (`0x1046`/`0x1047`) read `0x0000`/`0x0000` while
+  the motor was visibly spinning - it does not appear to be populated with real data on the
+  tested unit (likely no functioning encoder feedback loop, despite being documented generically
+  for the product family).
+
+What the app uses instead:
+- The **live speed readout** ("Speed reported by drive") reads the **profile/commanded velocity**
+  register (`0x1044`/`0x1045`) instead, which was confirmed to track real commanded values
+  (correctly read a signed value matching the commanded RPM and direction). This reflects what
+  the drive's trajectory generator is currently outputting, not confirmed encoder feedback - it's
+  labeled accordingly rather than as "actual speed."
+- **Graceful Stop completion** is computed from the drive's own documented ramp spec (ease-out is
+  ms per 1000 rpm) rather than polled from either status register: the app waits
+  `easeOutMs * (rpm / 1000)` plus a margin, then considers the motor stopped. This avoids
+  depending on any status signal that's proven unreliable on this hardware.
+- **On-connect state reconciliation** additionally checks that the profile velocity is near zero
+  before trusting the "running" bit, since that bit alone is known to be stale.
 
 **If Connect fails with "Failed to open serial port"** after a browser reload, crash, or closing
 the tab without clicking Disconnect: the OS-level port handle can be left locked (Web Serial does

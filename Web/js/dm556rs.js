@@ -10,6 +10,13 @@ const REG = {
   JOG_VEL: 0x01E1,          // Pr6.00 - fallback-only, see startRun()
   JOG_ACCDEC: 0x01E7,       // Pr6.03 - fallback-only, see startRun()
   MOTION_STATUS: 0x1003,    // read-only bitfield
+  // Confirmed on real hardware: PROFILE_VEL tracks the drive's commanded/ramping velocity
+  // correctly (read 0xFFFF/0xFFCD = -51 while commanding -49 rpm CCW). VEL_FEEDBACK, despite
+  // being documented as "actual/feedback" velocity, read 0x0000/0x0000 while the motor was
+  // visibly spinning - not populated with real data on the tested unit (likely no functioning
+  // encoder loop). Kept for hardware that might support it, but the app does not rely on it.
+  PROFILE_VEL_HI: 0x1044,
+  PROFILE_VEL_LO: 0x1045,
   VEL_FEEDBACK_HI: 0x1046,
   VEL_FEEDBACK_LO: 0x1047,
   ALARM: 0x2203,            // read-only
@@ -126,6 +133,16 @@ class DM556RSDrive {
     };
   }
 
+  // The drive's real-time commanded/ramping velocity - confirmed working on tested hardware.
+  // This is what the app uses for its live speed readout and state-reconciliation logic.
+  async readProfileVelocityRpm() {
+    const [hi, lo] = await this.modbus.readHoldingRegisters(this.slaveId, REG.PROFILE_VEL_HI, 2);
+    return combineHiLo(hi, lo);
+  }
+
+  // Encoder-based "actual" velocity per the manual - confirmed NON-functional (always read 0)
+  // on tested hardware even while spinning. Kept in case a different unit has real feedback;
+  // not used by the app's own logic (see readProfileVelocityRpm()).
   async readFeedbackVelocityRpm() {
     const [hi, lo] = await this.modbus.readHoldingRegisters(this.slaveId, REG.VEL_FEEDBACK_HI, 2);
     return combineHiLo(hi, lo);

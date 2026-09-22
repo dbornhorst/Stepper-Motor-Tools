@@ -2,8 +2,8 @@ import { SerialTransport, ModbusRTU, ModbusTimeoutError, ModbusCrcError, ModbusF
 import { DM556RSDrive, DIRECTION } from './dm556rs.js';
 import { loadSettings, saveSettings, resetSettings, DATA_FORMAT_OPTIONS, BAUD_RATE_OPTIONS, BAUD_RATE_CODES } from './settings.js';
 
-// Feedback velocity (rpm) at or below this magnitude is treated as "actually stopped" - see
-// the STOPPING case in applyPollResult().
+// Profile velocity (rpm) at or below this magnitude is treated as "actually stopped" when
+// reconciling state on connect - see connect().
 const STOP_RPM_EPSILON = 1;
 
 const STATE = {
@@ -205,13 +205,14 @@ async function connect() {
     // have left the drive running or faulted.
     const status = await app.drive.readStatus();
     const alarm = await app.drive.readAlarm();
-    // The "running" bit reflects "a motion path is active," which stays set even at 0 rpm (the
-    // same quirk that affects graceful-stop detection - see applyPollResult()). Confirmed on
-    // real hardware: reconnecting after a stop showed running=true with the shaft stationary.
-    // So corroborate with actual feedback speed before trusting the bit here too.
-    const feedbackRpm = await app.drive.readFeedbackVelocityRpm();
-    ui.statusFeedbackRpm.textContent = `${feedbackRpm} rpm`;
-    const actuallyRunning = status.running && Math.abs(feedbackRpm) > STOP_RPM_EPSILON;
+    // The "running" bit reflects "a motion path is active," which stays set even at 0 rpm.
+    // Confirmed on real hardware: reconnecting after a stop showed running=true with the shaft
+    // stationary. So corroborate with the drive's profile (commanded/ramping) velocity, which is
+    // confirmed to track real values, unlike the "feedback" register (see readFeedbackVelocityRpm
+    // doc comment) which read 0 even while spinning on tested hardware.
+    const profileRpm = await app.drive.readProfileVelocityRpm();
+    ui.statusFeedbackRpm.textContent = `${profileRpm} rpm`;
+    const actuallyRunning = status.running && Math.abs(profileRpm) > STOP_RPM_EPSILON;
 
     if (status.fault || alarm.hasAlarm) {
       app.state = STATE.FAULTED;
@@ -290,17 +291,19 @@ async function pollOnce() {
   try {
     const status = await app.drive.readStatus();
     const alarm = await app.drive.readAlarm();
-    let feedbackRpm = null;
-    // While stopping, we need actual speed every cycle (not just every 4th) to detect real
-    // standstill - see the STOPPING handling in applyPollResult() for why.
+    let profileRpm = null;
+    // Read more often while stopping just so the live readout tracks the ramp visually - the
+    // STOPPING -> CONNECTED_IDLE transition itself is timer-based, not gated on this value (see
+    // handleStop() for why: neither the status bit nor either velocity register proved reliable
+    // enough on tested hardware to gate a state transition on).
     if (app.pollCycle % 4 === 0 || app.state === STATE.STOPPING) {
-      feedbackRpm = await app.drive.readFeedbackVelocityRpm();
+      profileRpm = await app.drive.readProfileVelocityRpm();
     }
 
     app.missedPollCount = 0;
     if (app.linkLost) app.linkLost = false;
 
-    applyPollResult(status, alarm, feedbackRpm);
+    applyPollResult(status, alarm, profileRpm);
   } catch (err) {
     app.missedPollCount++;
     if (app.missedPollCount >= app.settings.linkLostThreshold) {
@@ -314,9 +317,9 @@ async function pollOnce() {
   }
 }
 
-function applyPollResult(status, alarm, feedbackRpm) {
-  if (feedbackRpm !== null) {
-    ui.statusFeedbackRpm.textContent = `${feedbackRpm} rpm`;
+function applyPollResult(status, alarm, profileRpm) {
+  if (profileRpm !== null) {
+    ui.statusFeedbackRpm.textContent = `${profileRpm} rpm`;
   }
 
   const inFaultLikeState = app.state === STATE.FAULTED || app.state === STATE.ESTOP_LATCHED;
@@ -328,13 +331,12 @@ function applyPollResult(status, alarm, feedbackRpm) {
   }
 
   if (app.state === STATE.STOPPING) {
-    // The "running" status bit reflects whether a motion path is active, not whether the shaft
-    // is actually turning - on this driver it can stay set even after a velocity-mode path is
-    // re-triggered at 0 rpm (which is how a graceful stop is implemented). So treat "actual
-    // speed reads ~0" as the real stop signal, and the status bit clearing as a bonus signal,
-    // whichever comes first.
-    const atStandstill = feedbackRpm !== null && Math.abs(feedbackRpm) <= STOP_RPM_EPSILON;
-    if (!status.running || atStandstill) {
+    // STOPPING -> CONNECTED_IDLE is driven by a timer set in handleStop(), not by anything read
+    // here: on tested hardware, the "running" status bit stays set indefinitely even at 0 rpm,
+    // and the documented "feedback velocity" register reads 0 even while the motor is visibly
+    // spinning. Neither is a trustworthy completion signal. We do still take an early exit if
+    // the status bit ever does clear, in case a different unit's firmware handles it correctly.
+    if (!status.running) {
       clearStopTimeout();
       app.state = STATE.CONNECTED_IDLE;
     }
@@ -387,11 +389,19 @@ async function handleStop() {
       decelMs: app.settings.easeOutMs,
     });
     app.state = STATE.STOPPING;
-    const timeoutMs = Math.max(3000, app.settings.easeOutMs + 2000);
+    // Neither the "running" status bit nor either velocity register proved reliable enough on
+    // tested hardware to gate this transition (see applyPollResult() and dm556rs.js comments),
+    // so completion is computed from the drive's own documented ramp spec instead: ease-out is
+    // ms per 1000 rpm, so the ramp from the current speed to 0 takes easeOutMs * (rpm / 1000).
+    // A margin covers communication latency and any rounding in the drive's own ramp timing.
+    const rampMs = app.settings.easeOutMs * (Math.abs(app.currentRpm) / 1000);
+    const marginMs = 500;
+    const timeoutMs = Math.max(800, rampMs + marginMs);
     clearStopTimeout();
     app.stopTimeoutTimer = setTimeout(() => {
       if (app.state === STATE.STOPPING) {
-        showTransientMessage('Stop was sent but the driver still reports running. Consider pressing E-Stop.');
+        app.state = STATE.CONNECTED_IDLE;
+        renderState();
       }
     }, timeoutMs);
   } catch (err) {
