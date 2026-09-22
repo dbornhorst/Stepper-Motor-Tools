@@ -155,11 +155,10 @@ class DM556RSDrive {
     await this.modbus.writeSingleRegister(this.slaveId, REG.PR_TRIGGER, PR_TRIGGER_VALUE.RUN_PATH0);
   }
 
-  // direction: DIRECTION.CW or DIRECTION.CCW. Primary design assumes a signed velocity register
-  // (negative = CCW) - this is UNVERIFIED against real hardware, see plan doc "Direction design
-  // decision" and commissioning stage 4. If that assumption is wrong, swap this method's body
-  // for the fallback (setDirectionSense() once while idle, or jogCW()/jogCCW()) without needing
-  // to change any other module.
+  // direction: DIRECTION.CW or DIRECTION.CCW. Uses a signed velocity register (negative = CCW) -
+  // confirmed against real hardware (positive rpm spins CW, negative spins CCW). If a different
+  // unit/firmware revision doesn't honor the sign, swap this method's body for the fallback
+  // (setDirectionSense() once while idle, or jogCW()/jogCCW()) without touching any other module.
   async startRun(rpm, direction, { accelMs, decelMs }) {
     const magnitude = Math.abs(rpm);
     const signedRpm = direction === DIRECTION.CCW ? -magnitude : magnitude;

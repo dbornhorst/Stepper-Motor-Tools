@@ -56,18 +56,29 @@ then open `http://localhost:8000` in Chrome.
   independent of a browser.
 - `DM556RS_Manual.pdf` — the driver's manual.
 
-## Design notes / known open question
+## Design notes
 
 There's no simple "speed register + run bit" on this driver — continuous-speed control is done
 via one of its 16 motion "path" slots (Path 0) configured in velocity mode, which is what this
 app uses so that ease-in and ease-out (acceleration/deceleration) can be set independently.
 
-**Direction is set by sending a signed velocity value** (negative = reverse). This matches how
-the driver's position-mode commands work, but it has **not been confirmed against real hardware**
-for velocity mode specifically — see the commissioning checklist below, step 5. If it turns out
-the driver doesn't accept a signed velocity, `Web/js/dm556rs.js` already has two documented
-fallback mechanisms implemented (`setDirectionSense()`, `jogCW()`/`jogCCW()`) ready to be wired
-into `startRun()` instead.
+**Direction is set by sending a signed velocity value** (negative = reverse) — confirmed against
+real hardware: positive rpm spins CW, negative spins CCW, no fallback needed. `Web/js/dm556rs.js`
+still has two documented-but-unused fallback mechanisms (`setDirectionSense()`,
+`jogCW()`/`jogCCW()`) left in place in case a different unit/firmware revision behaves
+differently, but the shipped `startRun()` uses the signed-velocity approach.
+
+**The driver's "running" status bit (`0x1003` bit 2) does not mean "the shaft is turning."**
+Confirmed against real hardware: it stays set after commanding a velocity-mode run at 0 rpm (how
+graceful Stop works), and can also read as stale/true immediately after reconnecting even with
+the motor stationary. The app treats actual feedback speed (`0x1046`/`0x1047`) reading ~0 as the
+real "stopped" signal instead, in both the Stop flow and on-connect state reconciliation.
+
+**If Connect fails with "Failed to open serial port"** after a browser reload, crash, or closing
+the tab without clicking Disconnect: the OS-level port handle can be left locked (Web Serial does
+not reliably release it on navigation). Unplug and replug the USB-RS485 adapter to clear it. The
+app also makes a best-effort attempt to close the port on page unload to reduce how often this
+happens, but it isn't guaranteed (browsers don't guarantee async work completes during unload).
 
 ## Before you rely on this tool: commissioning checklist
 
@@ -78,12 +89,10 @@ Do this once, on the bench, before using the tool for real work:
    Record the drive's DIP switch state before touching the software.
 2. **Read-only link check.** Connect. In the Advanced panel, read register `1003` (status) and
    `2203` (alarm) and confirm clean responses with no pre-existing alarm.
-3. **E-Stop check while stationary.** Press E-Stop with nothing running; confirm no error/fault.
-4. **Lowest-risk motion test.** Start at 5–10 RPM briefly. Confirm the shaft turns, and note
+3. ✅ **E-Stop check while stationary.** Press E-Stop with nothing running; confirm no error/fault.
+4. ✅ **Lowest-risk motion test.** Start at 5–10 RPM briefly. Confirm the shaft turns, and note
    which physical direction corresponds to "CW" in the app. Stop; confirm it decelerates.
-5. **Direction verification (the open question above).** With the motor stopped, try the
-   opposite direction at low RPM. If it doesn't actually reverse (or the driver returns an
-   error), switch to one of the fallback mechanisms already implemented in `dm556rs.js`.
+5. ✅ **Direction verification.** Confirmed on hardware — see Design notes above.
 6. **RPM range tuning.** Check there's no stall near your intended minimum RPM and nothing unsafe
    at your intended maximum; update the Settings panel's RPM min/max to match.
 7. **Ease-in/ease-out tuning.** Adjust the sliders at a mid-range RPM and confirm the ramps look

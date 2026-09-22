@@ -108,6 +108,14 @@ function main() {
   applySettingsToControlLimits();
   wireEvents();
   renderState();
+
+  // Best-effort: closing the port on navigation/tab-close isn't guaranteed to finish (async
+  // work during unload has no completion guarantee), but attempting it reduces the chance of
+  // leaving the OS-level port handle locked, which otherwise requires unplugging/replugging the
+  // adapter before it can be opened again (confirmed hitting this during manual testing).
+  window.addEventListener('pagehide', () => {
+    if (app.transport) app.transport.close().catch(() => {});
+  });
 }
 
 function populateSettingSelects() {
@@ -173,11 +181,18 @@ async function connect() {
     const formatInfo = DATA_FORMAT_OPTIONS[app.settings.dataFormat];
     app.transport = new SerialTransport();
     app.transport.onDisconnect(onLinkDown);
-    await app.transport.requestAndOpen({
+    const portOptions = {
       baudRate: app.settings.baudRate,
       parity: formatInfo.parity,
       stopBits: formatInfo.stopBits,
-    });
+    };
+    // Reuse a previously-granted port silently if one exists (Chrome remembers the grant per
+    // origin+device), only falling back to the picker if there isn't one - avoids re-prompting
+    // on every reload/reconnect for a device already approved.
+    const reused = await app.transport.openKnownPort(portOptions);
+    if (!reused) {
+      await app.transport.requestAndOpen(portOptions);
+    }
 
     app.modbus = new ModbusRTU(app.transport, {
       requestTimeoutMs: app.settings.requestTimeoutMs,
@@ -190,11 +205,18 @@ async function connect() {
     // have left the drive running or faulted.
     const status = await app.drive.readStatus();
     const alarm = await app.drive.readAlarm();
+    // The "running" bit reflects "a motion path is active," which stays set even at 0 rpm (the
+    // same quirk that affects graceful-stop detection - see applyPollResult()). Confirmed on
+    // real hardware: reconnecting after a stop showed running=true with the shaft stationary.
+    // So corroborate with actual feedback speed before trusting the bit here too.
+    const feedbackRpm = await app.drive.readFeedbackVelocityRpm();
+    ui.statusFeedbackRpm.textContent = `${feedbackRpm} rpm`;
+    const actuallyRunning = status.running && Math.abs(feedbackRpm) > STOP_RPM_EPSILON;
 
     if (status.fault || alarm.hasAlarm) {
       app.state = STATE.FAULTED;
       showFault(alarm);
-    } else if (status.running) {
+    } else if (actuallyRunning) {
       app.state = STATE.RUNNING;
       ui.statusCommanded.textContent = 'Running (reconnected - speed/direction as last set on the drive)';
     } else {
