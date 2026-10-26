@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>iCL Stepper Control</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div id="unsupported-notice" class="unsupported-notice" hidden>
+  <h1>Browser not supported</h1>
+  <p>
+    This tool needs the Web Serial API to talk to the Teensy over USB. That's only available in
+    <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on a desktop or laptop
+    computer.
+  </p>
+  <p>It will not work in Safari, Firefox, or on most mobile browsers.</p>
+</div>
+
+<div id="app" class="app">
+
+  <header class="app-header">
+    <h1>iCL Stepper Control</h1>
+    <p class="subtitle">Teensy 4.1 &middot; PUL/DIR &middot; Web Serial</p>
+  </header>
+
+  <div id="link-lost-banner" class="banner banner-warning" hidden>
+    <strong>Connection lost.</strong>
+    The Teensy generates step pulses independently of the USB link, so if the motor was running
+    it will keep running until you intervene &mdash; this app cannot stop it without a live
+    connection.
+    <button id="btn-reconnect" type="button">Reconnect</button>
+  </div>
+
+  <section class="connection-bar">
+    <button id="btn-connect" type="button" class="btn btn-primary">Connect</button>
+    <button id="btn-disconnect" type="button" class="btn" hidden>Disconnect</button>
+    <button id="btn-choose-port" type="button" class="btn-link">Choose a different port&hellip;</button>
+    <span id="connection-state" class="connection-state">Not connected</span>
+  </section>
+
+  <section id="status-panel" class="status-panel">
+    <div id="status-light" class="status-light status-idle">
+      <span id="status-text">Idle</span>
+    </div>
+    <div class="status-details">
+      <div>Target: <span id="status-target">&mdash;</span></div>
+      <div>Actual: <span id="status-actual">&mdash;</span></div>
+      <div>Steps: <span id="status-steps">&mdash;</span> <button id="btn-zero-steps" type="button" class="btn-link" disabled>zero</button></div>
+    </div>
+  </section>
+
+  <section class="controls-panel">
+    <h2>Run controls</h2>
+
+    <div class="control-row">
+      <label for="rpm-slider">Speed (RPM)</label>
+      <input type="range" id="rpm-slider" min="0" max="600" value="60">
+      <input type="number" id="rpm-number" min="0" max="600" value="60">
+    </div>
+
+    <div class="control-row">
+      <span class="control-label">Direction</span>
+      <div class="direction-toggle" role="radiogroup" aria-label="Direction">
+        <label><input type="radio" name="direction" value="CW" checked> Clockwise (CW)</label>
+        <label><input type="radio" name="direction" value="CCW"> Counter-clockwise (CCW)</label>
+      </div>
+    </div>
+    <p id="direction-hint" class="hint" hidden>Stop the motor to change direction.</p>
+
+    <div class="control-row">
+      <label for="accel-number">Accel (rpm/s)</label>
+      <input type="number" id="accel-number" min="1" value="300">
+      <label for="decel-number">Decel (rpm/s)</label>
+      <input type="number" id="decel-number" min="1" value="300">
+    </div>
+
+    <div class="control-row button-row">
+      <button id="btn-start" type="button" class="btn btn-primary" disabled>Start</button>
+      <button id="btn-stop" type="button" class="btn" disabled>Stop</button>
+    </div>
+
+    <button id="btn-estop" type="button" class="btn btn-estop" disabled>&#9888; EMERGENCY STOP</button>
+    <p class="hint">Space bar also triggers Emergency Stop while connected. E-Stop bypasses the
+      decel ramp entirely (immediate stop), unlike the Stop button.</p>
+  </section>
+
+  <section class="disclaimer">
+    <p>
+      <strong>Note:</strong> the connection-loss warning above is informational only. The Teensy's
+      step generator is a free-running hardware timer that doesn't depend on the USB link being
+      alive &mdash; only the drive's power or a physical E-Stop can guarantee the motor stops if
+      the serial connection is down.
+    </p>
+  </section>
+
+  <details class="settings-panel">
+    <summary>Settings</summary>
+
+    <div class="settings-grid">
+      <label>RPM min
+        <input type="number" id="setting-rpm-min" min="0">
+      </label>
+      <label>RPM max
+        <input type="number" id="setting-rpm-max" min="1">
+      </label>
+      <label>Steps per revolution
+        <input type="number" id="setting-steps-per-rev" min="1">
+      </label>
+      <label>Invert direction
+        <select id="setting-invert">
+          <option value="false">Normal</option>
+          <option value="true">Inverted</option>
+        </select>
+      </label>
+      <label>Link-lost timeout (ms)
+        <input type="number" id="setting-link-lost-timeout" min="200">
+      </label>
+      <label>Command quiet window (ms)
+        <input type="number" id="setting-command-quiet" min="50">
+      </label>
+      <label>Command timeout (ms)
+        <input type="number" id="setting-command-timeout" min="100">
+      </label>
+    </div>
+    <p class="hint">
+      Steps per revolution must match the drive's SW1&ndash;SW4 microstep DIP switches (default
+      400 = all on). Invert flips DIR polarity in software if CW/CCW came out backwards for your
+      wiring. Both require the motor to be stopped, matching the firmware's own rule. This drive's
+      firmware has no persistent storage &mdash; these reset to the sketch's compiled-in defaults
+      every time the Teensy powers up, so this app re-syncs them from the device on each Connect.
+    </p>
+    <div class="settings-actions">
+      <button id="btn-save-settings" type="button" class="btn btn-primary">Save settings</button>
+      <button id="btn-reset-settings" type="button" class="btn">Reset to defaults</button>
+    </div>
+
+    <details class="advanced-panel">
+      <summary>Advanced &mdash; raw command console (for commissioning/debugging)</summary>
+      <div class="control-row">
+        <label>Send raw command
+          <input type="text" id="raw-command" placeholder="status">
+        </label>
+        <button id="btn-raw-send" type="button" class="btn" disabled>Send</button>
+      </div>
+      <pre id="raw-command-log" class="hint" style="white-space: pre-wrap; max-height: 160px; overflow-y: auto;"></pre>
+    </details>
+  </details>
+
+  <footer class="app-footer">
+    <p>See <code>README.md</code> and the commissioning checklist before unattended use.</p>
+  </footer>
+
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

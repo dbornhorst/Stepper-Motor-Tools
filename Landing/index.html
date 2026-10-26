@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stepper-Motor-Tools</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --panel-bg: #22223a;
+    --text: #e8e8f0;
+    --muted: #a0a0b8;
+    --accent: #a0c4ff;
+    --border: #33334d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .page {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 48px 16px;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-top: 0; }
+  .tool-list { display: flex; flex-direction: column; gap: 16px; margin-top: 32px; }
+  a.tool-card {
+    display: block;
+    padding: 20px;
+    border-radius: 12px;
+    background: var(--panel-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    text-decoration: none;
+  }
+  a.tool-card:hover { border-color: var(--accent); }
+  .tool-card h2 { margin: 0 0 6px; font-size: 1.15rem; color: var(--accent); }
+  .tool-card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 0.85rem; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Stepper-Motor-Tools</h1>
+  <p class="subtitle">Browser-based motor control, no install required &mdash; runs entirely in Chrome/Edge via the Web Serial API.</p>
+
+  <div class="tool-list">
+    <a class="tool-card" href="./dm556rs/">
+      <h2>DM556RS Stepper Control</h2>
+      <p>RPM, direction, and ease-in/ease-out control for a STEPPERONLINE DM556RS Modbus RTU stepper driver.</p>
+    </a>
+    <a class="tool-card" href="./aim-servo/">
+      <h2>AIM Servo Control</h2>
+      <p>Status, jog, and positioning control for a YZ-AIM integrated Modbus RTU servo drive.</p>
+    </a>
+    <a class="tool-card" href="./icl/">
+      <h2>iCL Stepper Control</h2>
+      <p>RPM, direction, and ramp control for a StepperOnline iCL closed-loop stepper, driven by a Teensy over USB serial.</p>
+    </a>
+  </div>
+
+  <footer>
+    Source and per-tool docs on <a href="https://github.com/MeowWolf/Stepper-Motor-Tools">GitHub</a>.
+  </footer>
+</div>
+</body>
+</html>

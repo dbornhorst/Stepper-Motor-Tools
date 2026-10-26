@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIM Servo Control</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<div id="unsupported-notice" class="unsupported-notice" hidden>
+  <h1>Browser not supported</h1>
+  <p>
+    This tool needs the Web Serial API to talk to your USB-to-RS485 adapter. That's only
+    available in <strong>Google Chrome</strong> or <strong>Microsoft Edge</strong> on a desktop
+    or laptop computer.
+  </p>
+  <p>It will not work in Safari, Firefox, or on most mobile browsers.</p>
+</div>
+
+<div id="app" class="app">
+
+  <header class="app-header">
+    <h1>AIM Servo Control</h1>
+    <p class="subtitle">USB-to-RS485 &middot; Modbus RTU &middot; Web Serial</p>
+  </header>
+
+  <div id="link-lost-banner" class="banner banner-warning" hidden>
+    <strong>Connection lost.</strong>
+    If the servo was jogging, it may still be spinning &mdash; this app cannot stop it without
+    a live connection. Use the drive's enable input or power switch if needed.
+    <button id="btn-reconnect" type="button">Reconnect</button>
+  </div>
+
+  <section class="connection-bar">
+    <button id="btn-connect" type="button" class="btn btn-primary">Connect</button>
+    <button id="btn-disconnect" type="button" class="btn" hidden>Disconnect</button>
+    <button id="btn-choose-port" type="button" class="btn-link">Choose a different port&hellip;</button>
+    <span id="connection-state" class="connection-state">Not connected</span>
+  </section>
+
+  <section id="status-panel" class="status-panel">
+    <div id="status-light" class="status-light status-idle">
+      <span id="status-text">Idle</span>
+    </div>
+    <div class="status-details">
+      <div>Speed: <span id="status-speed">&mdash;</span></div>
+      <div>Position: <span id="status-position">&mdash;</span> pulses</div>
+      <div>Voltage: <span id="status-voltage">&mdash;</span></div>
+      <div>Temperature: <span id="status-temp">&mdash;</span></div>
+      <div>
+        Current: <span id="status-current">&mdash;</span>
+        <div class="current-bar-track"><div id="current-bar-fill" class="current-bar-fill"></div></div>
+      </div>
+      <div id="status-alarm" class="status-alarm" hidden></div>
+    </div>
+  </section>
+
+  <section class="controls-panel">
+    <div class="control-section">
+      <h2>Position control</h2>
+      <div class="control-row">
+        <label for="step-size">Step size (pulses)</label>
+        <input type="number" id="step-size" value="500" min="1">
+        <button id="btn-jog-neg" type="button" class="btn">&minus; Jog</button>
+        <button id="btn-jog-pos" type="button" class="btn">Jog +</button>
+      </div>
+      <div class="control-row">
+        <label for="absolute-target">Move to position</label>
+        <input type="number" id="absolute-target" value="0">
+        <button id="btn-move-absolute" type="button" class="btn">Go</button>
+      </div>
+      <div class="control-row">
+        <button id="btn-zero-position" type="button" class="btn">Zero position here</button>
+      </div>
+    </div>
+
+    <div class="control-section">
+      <h2>Speed mode (jog)</h2>
+      <div class="control-row">
+        <label for="jog-rpm-slider">Speed (RPM)</label>
+        <input type="range" id="jog-rpm-slider" min="0" max="1500" value="100">
+        <input type="number" id="jog-rpm-number" min="0" max="1500" value="100">
+      </div>
+      <div class="control-row">
+        <span class="control-label">Direction</span>
+        <div class="direction-toggle" role="radiogroup" aria-label="Direction">
+          <label><input type="radio" name="jog-direction" value="CW" checked> Clockwise (CW)</label>
+          <label><input type="radio" name="jog-direction" value="CCW"> Counter-clockwise (CCW)</label>
+        </div>
+      </div>
+      <p id="jog-direction-hint" class="hint" hidden>Stop jogging to change direction.</p>
+      <div class="control-row button-row">
+        <button id="btn-jog-start" type="button" class="btn btn-primary" disabled>Start</button>
+        <button id="btn-jog-stop" type="button" class="btn" disabled>Stop</button>
+      </div>
+    </div>
+
+    <div class="control-section">
+      <button id="btn-disable-output" type="button" class="btn" disabled>Disable output now</button>
+      <p class="hint">Immediately cuts torque (register write, bypasses the queue) &mdash; use if
+        something looks wrong. Not a substitute for the drive's own power switch.</p>
+    </div>
+
+    <div id="fault-panel" class="fault-panel" hidden>
+      <p id="fault-message"></p>
+      <button id="btn-clear-fault" type="button" class="btn">Resume</button>
+    </div>
+
+    <div id="trip-panel" class="trip-panel" hidden>
+      <p>Output was disabled automatically: measured current exceeded the configured safety
+        threshold (possible stall/bind). Confirm the shaft is free before resuming.</p>
+      <button id="btn-resume-trip" type="button" class="btn">Resume</button>
+    </div>
+  </section>
+
+  <section class="disclaimer">
+    <p>
+      <strong>Note:</strong> the connection-loss warning above is informational only. It cannot
+      stop the servo by itself &mdash; only the drive's enable input or power can do that if the
+      serial link is down.
+    </p>
+  </section>
+
+  <details class="settings-panel">
+    <summary>Settings</summary>
+
+    <div class="settings-grid">
+      <label>Slave ID
+        <input type="number" id="setting-slave-id" min="0" max="255">
+      </label>
+      <label>Model (sets RPM max)
+        <select id="setting-model"></select>
+      </label>
+      <label>RPM min
+        <input type="number" id="setting-rpm-min" min="0">
+      </label>
+      <label>RPM max
+        <input type="number" id="setting-rpm-max" min="1">
+      </label>
+      <label>Acceleration ((r/min)/s)
+        <input type="number" id="setting-accel" min="0" max="60098">
+      </label>
+      <label>Current cutoff (A)
+        <input type="number" id="setting-current-cutoff" min="0" step="0.05">
+      </label>
+      <label>Direction method
+        <select id="setting-direction-method">
+          <option value="signed">Signed target speed (default, confirmed)</option>
+          <option value="dir-polarity">Direction-polarity register (confirmed non-functional)</option>
+        </select>
+      </label>
+      <label>Positive = DIR polarity
+        <select id="setting-positive-dir-polarity">
+          <option value="0">0</option>
+          <option value="1">1</option>
+        </select>
+      </label>
+      <label>Poll interval (ms)
+        <input type="number" id="setting-poll-interval" min="50">
+      </label>
+      <label>Request timeout (ms)
+        <input type="number" id="setting-request-timeout" min="50">
+      </label>
+      <label>Inter-write delay (ms)
+        <input type="number" id="setting-inter-write-delay" min="0">
+      </label>
+      <label>Link-lost threshold (missed polls)
+        <input type="number" id="setting-link-lost-threshold" min="1">
+      </label>
+    </div>
+    <p class="hint">
+      This drive is fixed at 19200 baud / 8N1 (no configurable baud/parity register), so the app
+      always opens the serial port with those settings &mdash; only the Slave ID here needs to
+      match the drive. Settings are stored per browser origin: values saved while testing locally
+      won't carry over to the GitHub Pages URL, or vice versa.
+    </p>
+    <div class="settings-actions">
+      <button id="btn-save-settings" type="button" class="btn btn-primary">Save settings</button>
+      <button id="btn-reset-settings" type="button" class="btn">Reset to defaults</button>
+    </div>
+
+    <details class="danger-zone">
+      <summary>Danger zone &mdash; write configuration to the drive</summary>
+      <p class="hint">
+        These write to the drive's own memory and save to EEPROM (limited write cycles &mdash;
+        don't use these routinely). Only meaningful when connected.
+      </p>
+      <div class="control-row">
+        <input type="number" id="danger-gear-num" placeholder="Numerator">
+        <input type="number" id="danger-gear-den" placeholder="Denominator">
+        <button id="btn-danger-gear" type="button" class="btn" disabled>Write electronic gear</button>
+      </div>
+      <div class="control-row">
+        <button id="btn-danger-persistent-comm" type="button" class="btn" disabled>Set persistent comm-mode on power-up</button>
+      </div>
+    </details>
+
+    <details class="advanced-panel">
+      <summary>Advanced &mdash; raw register access (for commissioning/debugging)</summary>
+      <div class="control-row">
+        <label>Read register (hex addr, e.g. 0E)
+          <input type="text" id="raw-read-addr" placeholder="0E">
+        </label>
+        <button id="btn-raw-read" type="button" class="btn" disabled>Read</button>
+        <span id="raw-read-result"></span>
+      </div>
+      <div class="control-row">
+        <label>Write register (hex addr / hex value)
+          <input type="text" id="raw-write-addr" placeholder="01">
+          <input type="text" id="raw-write-value" placeholder="0001">
+        </label>
+        <button id="btn-raw-write" type="button" class="btn" disabled>Write</button>
+        <span id="raw-write-result"></span>
+      </div>
+    </details>
+  </details>
+
+  <footer class="app-footer">
+    <p>See <code>README.md</code> and the commissioning checklist before unattended use.</p>
+  </footer>
+
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
